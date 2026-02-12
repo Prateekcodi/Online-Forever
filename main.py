@@ -84,67 +84,67 @@ def get_leetcode_solved():
         return "Error"
 
 # ────────────────────────────────────────────────
-# WebSocket connection with LeetCode status
+# Quick WebSocket connection - send status and disconnect
 # ────────────────────────────────────────────────
-async def onliner(token, status):
-    async with websockets.connect("wss://gateway.discord.gg/?v=9&encoding=json") as ws:
-        start = json.loads(await ws.recv())
-        heartbeat = start["d"]["heartbeat_interval"]
+async def send_status_quick(token, status):
+    try:
+        async with websockets.connect("wss://gateway.discord.gg/?v=9&encoding=json", max_size=1048576) as ws:
+            # Wait for HELLO event
+            start = json.loads(await ws.recv())
+            heartbeat = start["d"]["heartbeat_interval"]
 
-        # Identify / login - reduced properties to avoid large payload
-        auth = {
-            "op": 2,
-            "d": {
-                "token": token,
-                "properties": {
-                    "$os": "Windows 10",
-                    "$browser": "Google Chrome",
-                    "$device": "Windows",
+            # Get LeetCode count before identifying
+            solved = get_leetcode_solved()
+            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
+            custom_text = f"LeetCode Solved: {solved} 🔥"
+
+            # Identify with minimal data
+            auth = {
+                "op": 2,
+                "d": {
+                    "token": token,
+                    "properties": {
+                        "$os": "Windows 10",
+                        "$browser": "Google Chrome",
+                        "$device": "Windows",
+                    },
+                    "presence": {"status": status, "afk": False},
+                    "compress": False,
                 },
-                "presence": {"status": status, "afk": False},
-                "compress": False,
-                "large_threshold": 50,
-            },
-        }
-        await ws.send(json.dumps(auth))
-        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent, waiting for ready...")
-        
-        # Wait for READY event
-        await ws.recv()
-        
-        # Get current LeetCode count
-        solved = get_leetcode_solved()
-        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
-        custom_text = f"LeetCode Solved: {solved} 🔥"
-        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Setting custom status: {custom_text}")
+            }
+            await ws.send(json.dumps(auth))
+            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent")
 
-        # Set custom status (type 4 = custom status)
-        cstatus = {
-            "op": 3,
-            "d": {
-                "since": 0,
-                "activities": [
-                    {
-                        "type": 4,
-                        "state": custom_text,
-                        "name": "Custom Status",
-                        "id": "custom"
-                    }
-                ],
-                "status": status,
-                "afk": False,
-            },
-        }
-        await ws.send(json.dumps(cstatus))
-        print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent!")
+            # Immediately send status update before READY
+            cstatus = {
+                "op": 3,
+                "d": {
+                    "since": 0,
+                    "activities": [
+                        {
+                            "type": 4,
+                            "state": custom_text,
+                            "name": "Custom Status",
+                            "id": "custom"
+                        }
+                    ],
+                    "status": status,
+                    "afk": False,
+                },
+            }
+            await ws.send(json.dumps(cstatus))
+            print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent: {custom_text}")
 
-        # Heartbeat loop
-        while True:
-            await ws.send(json.dumps({"op": 1, "d": "None"}))
+            # Send one heartbeat and close quickly
             await asyncio.sleep(heartbeat / 1000)
+            await ws.send(json.dumps({"op": 1, "d": "None"}))
+
+    except Exception as e:
+        print(f"{Fore.RED}Error sending status: {e}")
+        raise
 
 # ────────────────────────────────────────────────
-# Main loop (reconnect on drop)
+# Main loop (send status and reconnect)
 # ────────────────────────────────────────────────
 async def run_onliner():
     if platform.system() == "Windows":
@@ -154,14 +154,15 @@ async def run_onliner():
     
     print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Logged in as {Fore.LIGHTBLUE_EX}{username} ({userid})!")
     print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode username: {LEETCODE_USERNAME}")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Custom status updates every reconnect (~50s)")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Sending status every 50 seconds...")
 
     while True:
         try:
-            await onliner(usertoken, DISCORD_STATUS)
+            await send_status_quick(usertoken, DISCORD_STATUS)
         except Exception as e:
-            print(f"{Fore.YELLOW}Connection dropped: {e}. Reconnecting in 10s...")
-            await asyncio.sleep(10)
+            print(f"{Fore.YELLOW}Connection error: {e}. Reconnecting in 10s...")
+        
+        await asyncio.sleep(50)
 
 keep_alive()
 asyncio.run(run_onliner())
