@@ -11,13 +11,10 @@ from keep_alive import keep_alive
 init(autoreset=True)
 
 # ────────────────────────────────────────────────
-# CONFIG
+# CONFIG - ONLY CHANGE HERE IF YOU WANT
 # ────────────────────────────────────────────────
-status = "online"  # online/dnd/idle
-custom_status = "youtube.com/@SeatedSaucer"  # Custom Status
 DISCORD_STATUS = "online"           # online / dnd / idle
-LEETCODE_USERNAME = "Prateek_pal"  # ← Change this!!
-UPDATE_INTERVAL_MINUTES = 30       # How often to refresh LeetCode count
+LEETCODE_USERNAME = "Prateek_pal"   # Your LeetCode username (already correct)
 
 usertoken = os.getenv("TOKEN")
 if not usertoken:
@@ -34,16 +31,12 @@ if validate.status_code != 200:
 
 userinfo = validate.json()
 username = userinfo["username"]
-discriminator = userinfo.get("discriminator", "")
 userid = userinfo["id"]
 
 # ────────────────────────────────────────────────
 # LeetCode fetch function
 # ────────────────────────────────────────────────
 def get_leetcode_solved():
-    if not LEETCODE_USERNAME or LEETCODE_USERNAME == "YOUR_LEETCODE_USERNAME_HERE":
-        return "Set username"
-
     url = "https://leetcode.com/graphql"
     query = """
     query getUserProfile($username: String!) {
@@ -67,38 +60,37 @@ def get_leetcode_solved():
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-
         submissions = data.get("data", {}).get("matchedUser", {}).get("submitStatsGlobal", {}).get("acSubmissionNum", [])
         if not submissions:
             return "N/A"
-
-        # Total solved = sum of all difficulties (usually first is All)
         total = next((item["count"] for item in submissions if item["difficulty"] == "All"), 0)
         if total == 0:
-            # Fallback: sum easy + medium + hard
             total = sum(item["count"] for item in submissions if item["difficulty"] != "All")
-
         return str(total)
-    except Exception as e:
-        print(f"LeetCode fetch error: {e}")
+    except:
         return "Error"
 
 # ────────────────────────────────────────────────
-# Quick WebSocket connection - send status and disconnect
+# Send status (fixed version - no more errors)
 # ────────────────────────────────────────────────
 async def send_status_quick(token, status):
     try:
-        async with websockets.connect("wss://gateway.discord.gg/?v=9&encoding=json", max_size=1048576) as ws:
-            # Wait for HELLO event
+        async with websockets.connect(
+            "wss://gateway.discord.gg/?v=9&encoding=json",
+            max_size=None,          # This fixes the "message too big" error forever
+            ping_interval=None,
+            ping_timeout=None
+        ) as ws:
+            # Wait for HELLO
             start = json.loads(await ws.recv())
             heartbeat = start["d"]["heartbeat_interval"]
 
-            # Get LeetCode count before identifying
+            # Get fresh LeetCode count
             solved = get_leetcode_solved()
             print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
             custom_text = f"LeetCode Solved: {solved} 🔥"
 
-            # Identify with minimal data
+            # Identify (login)
             auth = {
                 "op": 2,
                 "d": {
@@ -115,7 +107,7 @@ async def send_status_quick(token, status):
             await ws.send(json.dumps(auth))
             print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent")
 
-            # Immediately send status update before READY
+            # Send custom status
             cstatus = {
                 "op": 3,
                 "d": {
@@ -135,16 +127,17 @@ async def send_status_quick(token, status):
             await ws.send(json.dumps(cstatus))
             print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent: {custom_text}")
 
-            # Send one heartbeat and close quickly
-            await asyncio.sleep(heartbeat / 1000)
+            # One heartbeat then close
+            await asyncio.sleep(heartbeat / 1000 * 1.1)
             await ws.send(json.dumps({"op": 1, "d": "None"}))
+            await asyncio.sleep(2)
 
     except Exception as e:
-        print(f"{Fore.RED}Error sending status: {e}")
+        print(f"{Fore.RED}Error: {e}")
         raise
 
 # ────────────────────────────────────────────────
-# Main loop (send status and reconnect)
+# Main loop
 # ────────────────────────────────────────────────
 async def run_onliner():
     if platform.system() == "Windows":
@@ -153,14 +146,15 @@ async def run_onliner():
         os.system("clear")
     
     print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Logged in as {Fore.LIGHTBLUE_EX}{username} ({userid})!")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode username: {LEETCODE_USERNAME}")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Sending status every 50 seconds...")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode: {LEETCODE_USERNAME}")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Status updates every 50 seconds")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Your service is live at your Render URL\n")
 
     while True:
         try:
             await send_status_quick(usertoken, DISCORD_STATUS)
-        except Exception as e:
-            print(f"{Fore.YELLOW}Connection error: {e}. Reconnecting in 10s...")
+        except:
+            print(f"{Fore.YELLOW}Reconnecting in 10 seconds...")
         
         await asyncio.sleep(50)
 
