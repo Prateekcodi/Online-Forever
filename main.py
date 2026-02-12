@@ -94,7 +94,7 @@ async def gateway_loop():
             async with websockets.connect(
                 "wss://gateway.discord.gg/?v=9&encoding=json",
                 max_size=None,
-                ping_interval=35,
+                ping_interval=20,
                 ping_timeout=20
             ) as ws:
                 hello = json.loads(await ws.recv())
@@ -173,7 +173,9 @@ async def gateway_loop():
                         print(f"{Fore.CYAN}[HB] Sent")
 
         except websockets.exceptions.ConnectionClosed as e:
-            print(f"{Fore.YELLOW}Disconnected ({e.code}): {e.reason or 'Unknown'}")
+            print(f"{Fore.YELLOW}Disconnected code: {e.code} reason: {e.reason}")
+            print(f"{Fore.YELLOW}Full exception: {e}")
+            
             if e.code == 4004:
                 print(f"{Fore.RED}4004 → Token invalidated. Get fresh token from browser DevTools → update env var → redeploy")
             await asyncio.sleep(30 + random.randint(0, 60))
