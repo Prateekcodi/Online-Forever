@@ -1,0 +1,158 @@
+import os
+import sys
+import json
+import asyncio
+import platform
+import requests
+import websockets
+from colorama import init, Fore
+from keep_alive import keep_alive
+
+init(autoreset=True)
+
+# ────────────────────────────────────────────────
+# CONFIG
+# ────────────────────────────────────────────────
+DISCORD_STATUS = "online"           # online / dnd / idle
+LEETCODE_USERNAME = "Prateek_pal"  # ← Change this!!
+UPDATE_INTERVAL_MINUTES = 30       # How often to refresh LeetCode count
+
+usertoken = os.getenv("TOKEN")
+if not usertoken:
+    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] Please add a token inside Secrets.")
+    sys.exit()
+
+headers = {"Authorization": usertoken, "Content-Type": "application/json"}
+
+# Validate token
+validate = requests.get("https://canary.discordapp.com/api/v9/users/@me", headers=headers)
+if validate.status_code != 200:
+    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] Your token might be invalid. Please check it again.")
+    sys.exit()
+
+userinfo = validate.json()
+username = userinfo["username"]
+discriminator = userinfo.get("discriminator", "")
+userid = userinfo["id"]
+
+# ────────────────────────────────────────────────
+# LeetCode fetch function
+# ────────────────────────────────────────────────
+def get_leetcode_solved():
+    if not LEETCODE_USERNAME or LEETCODE_USERNAME == "YOUR_LEETCODE_USERNAME_HERE":
+        return "Set username"
+
+    url = "https://leetcode.com/graphql"
+    query = """
+    query getUserProfile($username: String!) {
+      matchedUser(username: $username) {
+        submitStatsGlobal {
+          acSubmissionNum {
+            difficulty
+            count
+          }
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {"username": LEETCODE_USERNAME},
+        "operationName": "getUserProfile"
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        submissions = data.get("data", {}).get("matchedUser", {}).get("submitStatsGlobal", {}).get("acSubmissionNum", [])
+        if not submissions:
+            return "N/A"
+
+        # Total solved = sum of all difficulties (usually first is All)
+        total = next((item["count"] for item in submissions if item["difficulty"] == "All"), 0)
+        if total == 0:
+            # Fallback: sum easy + medium + hard
+            total = sum(item["count"] for item in submissions if item["difficulty"] != "All")
+
+        return str(total)
+    except Exception as e:
+        print(f"LeetCode fetch error: {e}")
+        return "Error"
+
+# ────────────────────────────────────────────────
+# WebSocket connection with LeetCode status
+# ────────────────────────────────────────────────
+async def onliner(token, status):
+    async with websockets.connect("wss://gateway.discord.gg/?v=9&encoding=json") as ws:
+        start = json.loads(await ws.recv())
+        heartbeat = start["d"]["heartbeat_interval"]
+
+        # Identify / login
+        auth = {
+            "op": 2,
+            "d": {
+                "token": token,
+                "properties": {
+                    "$os": platform.system(),
+                    "$browser": "Google Chrome",
+                    "$device": platform.system(),
+                },
+                "presence": {"status": status, "afk": False},
+            },
+        }
+        await ws.send(json.dumps(auth))
+
+        # Get current LeetCode count
+        solved = get_leetcode_solved()
+        custom_text = f"LeetCode Solved: {solved} 🔥"   # ← Customize this line!
+
+        # Set custom status (type 4 = custom status)
+        cstatus = {
+            "op": 3,
+            "d": {
+                "since": 0,
+                "activities": [
+                    {
+                        "type": 4,
+                        "state": custom_text,
+                        "name": "Custom Status",
+                        "id": "custom"
+                        # Optional emoji (uncomment & fill):
+                        # ,"emoji": {"name": "fire", "id": "123456789012345678", "animated": False}
+                    }
+                ],
+                "status": status,
+                "afk": False,
+            },
+        }
+        await ws.send(json.dumps(cstatus))
+
+        # Heartbeat loop
+        while True:
+            await ws.send(json.dumps({"op": 1, "d": "None"}))
+            await asyncio.sleep(heartbeat / 1000)
+
+# ────────────────────────────────────────────────
+# Main loop (reconnect on drop)
+# ────────────────────────────────────────────────
+async def run_onliner():
+    if platform.system() == "Windows":
+        os.system("cls")
+    else:
+        os.system("clear")
+    
+    print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Logged in as {Fore.LIGHTBLUE_EX}{username} ({userid})!")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode username: {LEETCODE_USERNAME}")
+    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Custom status updates every reconnect (~50s)")
+
+    while True:
+        try:
+            await onliner(usertoken, DISCORD_STATUS)
+        except Exception as e:
+            print(f"{Fore.YELLOW}Connection dropped: {e}. Reconnecting in 10s...")
+            await asyncio.sleep(10)
+
+keep_alive()
+asyncio.run(run_onliner())
