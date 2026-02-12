@@ -13,33 +13,36 @@ from keep_alive import keep_alive
 init(autoreset=True)
 
 # ────────────────────────────────────────────────
-# CONFIG - FILL THESE FOR FANCY LOOK + IMAGE
+# CONFIG
 # ────────────────────────────────────────────────
-DISCORD_STATUS = "online"  # online / dnd / idle
+DISCORD_STATUS = "online"
 
 LEETCODE_USERNAME = "Prateek_pal"
 
-# From your Discord Developer Application
-APPLICATION_ID = "1471509621888782582"           # ← Paste the big number here (required for images)
-LARGE_IMAGE_KEY = "time"                  # ← Exact key from Art Assets (e.g. "hacker_matrix", "leet_void")
-LARGE_IMAGE_TEXT = "Hacking LeetCode Reality"         # Hover text when mouse over large image
-SMALL_IMAGE_KEY = None                                # Optional: small image key or None
-SMALL_IMAGE_TEXT = None                               # Optional hover text
+# From your Discord Developer Application (exactly from screenshot)
+APPLICATION_ID = "1471509621888782582"
 
-# Fancy / crazy text
-PLAYING_NAME = "Hacking the Matrix"                   # Top line: "Playing Hacking the Matrix"
-DETAILS = "LeetCode Solved: {solved}"                 # 2nd line
-STATE = "Streak: {streak} days 🔥 Mad Coding"         # 3rd line
+# Rich Presence assets (exactly as in your screenshot)
+LARGE_IMAGE_KEY  = "time"
+LARGE_IMAGE_TEXT = "Numbani"
+
+SMALL_IMAGE_KEY  = "time"
+SMALL_IMAGE_TEXT = "Rogue - Level 100"
+
+# Fancy/crazy playing text (you can change these)
+PLAYING_NAME = "Hacking the Matrix"
+DETAILS_TEMPLATE = "LeetCode Solved: {solved}"
+STATE_TEMPLATE   = "Streak: {streak} days 🔥 Mad Coding"
 
 usertoken = os.getenv("TOKEN", "").strip()
 if not usertoken:
-    print(f"{Fore.RED}No TOKEN in env.")
+    print(f"{Fore.RED}No TOKEN in environment variables.")
     sys.exit()
 
 headers = {"Authorization": usertoken, "Content-Type": "application/json"}
 validate = requests.get("https://discord.com/api/v9/users/@me", headers=headers)
 if validate.status_code != 200:
-    print(f"{Fore.RED}Token invalid.")
+    print(f"{Fore.RED}Token invalid (HTTP {validate.status_code}). Get fresh token from browser.")
     sys.exit()
 
 userinfo = validate.json()
@@ -71,14 +74,17 @@ def get_leetcode_stats():
 
         return solved, streak
     except Exception as e:
-        print(f"{Fore.YELLOW}Fetch error: {e}")
+        print(f"{Fore.YELLOW}LeetCode fetch failed: {e}")
         return 0, 0
 
 async def gateway_loop():
     os.system("cls" if platform.system() == "Windows" else "clear")
     print(f"{Fore.GREEN}[+] Started as {username} ({userid})")
-    print(f"{Fore.CYAN}[i] Fancy Playing status with image + LeetCode stats")
-    print(f"{Fore.CYAN}[i] App ID: {APPLICATION_ID[:10]}... | Large key: {LARGE_IMAGE_KEY}")
+    print(f"{Fore.CYAN}[i] LeetCode username: {LEETCODE_USERNAME}")
+    print(f"{Fore.CYAN}[i] Application ID: {APPLICATION_ID}")
+    print(f"{Fore.CYAN}[i] Large image: time | Text: Numbani")
+    print(f"{Fore.CYAN}[i] Small image: time | Text: Rogue - Level 100")
+    print(f"{Fore.CYAN}[i] Playing: {PLAYING_NAME}")
     print(f"{Fore.CYAN}[i] Updates every ~30 min | Online 24/7\n")
 
     last_update = 0
@@ -93,7 +99,7 @@ async def gateway_loop():
             ) as ws:
                 hello = json.loads(await ws.recv())
                 hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
-                print(f"{Fore.CYAN}[+] Connected | HB ~{hb_interval:.0f}s")
+                print(f"{Fore.CYAN}[+] Connected | Heartbeat ~{hb_interval:.0f}s")
 
                 identify = {
                     "op": 2,
@@ -128,10 +134,11 @@ async def gateway_loop():
 
                         seq = data.get("s", seq)
 
-                        if time.time() - last_update > 1800:  # 30 min
+                        # Update status every 30 minutes
+                        if time.time() - last_update > 1800:
                             solved, streak = get_leetcode_stats()
-                            details_text = DETAILS.format(solved=solved)
-                            state_text = STATE.format(streak=streak)
+                            details_text = DETAILS_TEMPLATE.format(solved=solved)
+                            state_text   = STATE_TEMPLATE.format(streak=streak)
 
                             activity = {
                                 "application_id": APPLICATION_ID,
@@ -139,16 +146,14 @@ async def gateway_loop():
                                 "name": PLAYING_NAME,
                                 "details": details_text,
                                 "state": state_text,
-                                "timestamps": {"start": int(time.time() * 1000) - random.randint(300, 3600)},  # Fake elapsed time
-                                "assets": {}
+                                "timestamps": {"start": int(time.time() * 1000) - random.randint(300, 3600)},
+                                "assets": {
+                                    "large_image": LARGE_IMAGE_KEY,
+                                    "large_text": LARGE_IMAGE_TEXT,
+                                    "small_image": SMALL_IMAGE_KEY,
+                                    "small_text": SMALL_IMAGE_TEXT
+                                } if LARGE_IMAGE_KEY else {}
                             }
-
-                            if LARGE_IMAGE_KEY:
-                                activity["assets"]["large_image"] = LARGE_IMAGE_KEY
-                                activity["assets"]["large_text"] = LARGE_IMAGE_TEXT
-                            if SMALL_IMAGE_KEY:
-                                activity["assets"]["small_image"] = SMALL_IMAGE_KEY
-                                activity["assets"]["small_text"] = SMALL_IMAGE_TEXT
 
                             payload = {
                                 "op": 3,
@@ -160,7 +165,7 @@ async def gateway_loop():
                                 }
                             }
                             await ws.send(json.dumps(payload))
-                            print(f"{Fore.GREEN}[+] Fancy status sent: {PLAYING_NAME} | {details_text} | {state_text}")
+                            print(f"{Fore.GREEN}[+] Status sent: {PLAYING_NAME} | {details_text} | {state_text}")
                             last_update = time.time()
 
                     except asyncio.TimeoutError:
@@ -170,7 +175,7 @@ async def gateway_loop():
         except websockets.exceptions.ConnectionClosed as e:
             print(f"{Fore.YELLOW}Disconnected ({e.code}): {e.reason or 'Unknown'}")
             if e.code == 4004:
-                print(f"{Fore.RED}4004 → Token invalidated. Get fresh token from browser → update env → redeploy")
+                print(f"{Fore.RED}4004 → Token invalidated. Get fresh token from browser DevTools → update env var → redeploy")
             await asyncio.sleep(30 + random.randint(0, 60))
         except Exception as e:
             print(f"{Fore.RED}Error: {e}")
