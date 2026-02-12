@@ -11,31 +11,28 @@ from keep_alive import keep_alive
 init(autoreset=True)
 
 # ────────────────────────────────────────────────
-# CONFIG - ONLY CHANGE HERE IF YOU WANT
+# CONFIG
 # ────────────────────────────────────────────────
-DISCORD_STATUS = "online"           # online / dnd / idle
-LEETCODE_USERNAME = "Prateek_pal"   # Your LeetCode username (already correct)
+DISCORD_STATUS = "online"
+LEETCODE_USERNAME = "Prateek_pal"
 
-usertoken = os.getenv("TOKEN")
+usertoken = os.getenv("TOKEN").strip()  # .strip() removes accidental whitespace/newlines
 if not usertoken:
-    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] Please add a token inside Secrets.")
+    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] No TOKEN in env vars. Add it in Render Secrets.")
     sys.exit()
 
 headers = {"Authorization": usertoken, "Content-Type": "application/json"}
 
-# Validate token
-validate = requests.get("https://canary.discordapp.com/api/v9/users/@me", headers=headers)
+validate = requests.get("https://discord.com/api/v9/users/@me", headers=headers)  # Use production endpoint
 if validate.status_code != 200:
-    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] Your token might be invalid. Please check it again.")
+    print(f"{Fore.WHITE}[{Fore.RED}-{Fore.WHITE}] Token invalid right now (HTTP {validate.status_code}). Regenerate it from browser.")
+    print(validate.text)
     sys.exit()
 
 userinfo = validate.json()
 username = userinfo["username"]
 userid = userinfo["id"]
 
-# ────────────────────────────────────────────────
-# LeetCode fetch function
-# ────────────────────────────────────────────────
 def get_leetcode_solved():
     url = "https://leetcode.com/graphql"
     query = """
@@ -50,140 +47,99 @@ def get_leetcode_solved():
       }
     }
     """
-    payload = {
-        "query": query,
-        "variables": {"username": LEETCODE_USERNAME},
-        "operationName": "getUserProfile"
-    }
-
+    payload = {"query": query, "variables": {"username": LEETCODE_USERNAME}}
     try:
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        submissions = data.get("data", {}).get("matchedUser", {}).get("submitStatsGlobal", {}).get("acSubmissionNum", [])
-        if not submissions:
-            return "N/A"
-        total = next((item["count"] for item in submissions if item["difficulty"] == "All"), 0)
+        subs = data.get("data", {}).get("matchedUser", {}).get("submitStatsGlobal", {}).get("acSubmissionNum", [])
+        total = next((s["count"] for s in subs if s["difficulty"] == "All"), 0)
         if total == 0:
-            total = sum(item["count"] for item in submissions if item["difficulty"] != "All")
-        return str(total)
-    except:
+            total = sum(s["count"] for s in subs)
+        return str(total) if total else "N/A"
+    except Exception as e:
+        print(f"LeetCode error: {e}")
         return "Error"
 
-# ────────────────────────────────────────────────
-# Send status (fixed: wait for READY before sending op 3)
-# ────────────────────────────────────────────────
 async def send_status_quick(token, status):
     try:
         async with websockets.connect(
             "wss://gateway.discord.gg/?v=9&encoding=json",
-            max_size=None,          # Fixes "message too big"
+            max_size=None,
             ping_interval=None,
             ping_timeout=None
         ) as ws:
-            # Receive HELLO (op 10)
             hello = json.loads(await ws.recv())
-            heartbeat_interval = hello["d"]["heartbeat_interval"]
-            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Received HELLO")
+            hb_interval = hello["d"]["heartbeat_interval"]
+            print(f"{Fore.CYAN}[DEBUG] HELLO received")
 
-            # Send IDENTIFY (op 2)
             auth = {
                 "op": 2,
                 "d": {
                     "token": token,
-                    "properties": {
-                        "$os": "Windows 10",
-                        "$browser": "Google Chrome",
-                        "$device": "Windows",
-                    },
+                    "properties": {"$os": platform.system(), "$browser": "Chrome", "$device": "PC"},
                     "presence": {"status": status, "afk": False},
                     "compress": False,
-                },
+                }
             }
             await ws.send(json.dumps(auth))
-            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent")
+            print(f"{Fore.CYAN}[DEBUG] Identify sent")
 
-            # Get fresh LeetCode count
             solved = get_leetcode_solved()
-            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
+            print(f"{Fore.CYAN}[DEBUG] LeetCode: {solved}")
             custom_text = f"LeetCode Solved: {solved} 🔥"
 
-            # Prepare custom status (op 3)
             cstatus = {
                 "op": 3,
                 "d": {
                     "since": 0,
-                    "activities": [
-                        {
-                            "type": 4,
-                            "state": custom_text,
-                            "name": "Custom Status",
-                            "id": "custom"
-                        }
-                    ],
+                    "activities": [{"type": 4, "state": custom_text, "name": "Custom Status", "id": "custom"}],
                     "status": status,
-                    "afk": False,
-                },
+                    "afk": False
+                }
             }
 
-            # Now loop to receive events until READY (op 0)
-            heartbeat_task = None
             ready_received = False
             while not ready_received:
                 try:
-                    message = await asyncio.wait_for(ws.recv(), timeout=heartbeat_interval / 1000)
-                    data = json.loads(message)
-                    op = data["op"]
+                    msg = await asyncio.wait_for(ws.recv(), timeout=hb_interval / 1000)
+                    data = json.loads(msg)
+                    op = data.get("op")
 
-                    if op == 10:  # HELLO (should already be handled)
-                        pass
-                    elif op == 11:  # HEARTBEAT_ACK
-                        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat ACK received")
-                    elif op == 0:  # DISPATCH (e.g., READY)
-                        if data["t"] == "READY":
-                            ready_received = True
-                            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Received READY")
-                            # Now send custom status
-                            await ws.send(json.dumps(cstatus))
-                            print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent: {custom_text}")
-                    elif op == 1:  # HEARTBEAT request
+                    if op == 0 and data.get("t") == "READY":
+                        ready_received = True
+                        print(f"{Fore.CYAN}[DEBUG] READY received - authenticated!")
+                        await ws.send(json.dumps(cstatus))
+                        print(f"{Fore.GREEN}[+] Status sent: {custom_text}")
+                    elif op == 1:
                         await ws.send(json.dumps({"op": 1, "d": None}))
-                        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat sent")
-
-                    # Ignore other events for now
+                    # Ignore other ops
 
                 except asyncio.TimeoutError:
-                    # Send heartbeat if timeout (no message)
                     await ws.send(json.dumps({"op": 1, "d": None}))
-                    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat sent (timeout)")
 
-            # After sending status, wait a bit and close
-            await asyncio.sleep(5)
+            await asyncio.sleep(5)  # Give time for delivery
 
+    except websockets.exceptions.ConnectionClosed as e:
+        if e.code == 4004:
+            print(f"{Fore.RED}!!! 4004 Authentication failed - TOKEN INVALIDATED !!!")
+            print(f"Reason: {e.reason}")
+            print("Fix: Log in to Discord browser → get fresh token from DevTools → update Render env var → redeploy")
+        else:
+            print(f"{Fore.RED}Connection closed: {e.code} - {e.reason}")
     except Exception as e:
         print(f"{Fore.RED}Error: {e}")
 
-# ────────────────────────────────────────────────
-# Main loop
-# ────────────────────────────────────────────────
 async def run_onliner():
-    if platform.system() == "Windows":
-        os.system("cls")
-    else:
-        os.system("clear")
-    
-    print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Logged in as {Fore.LIGHTBLUE_EX}{username} ({userid})!")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode: {LEETCODE_USERNAME}")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Status updates every 50 seconds")
-    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Your service is live at your Render URL\n")
+    os.system("cls" if platform.system() == "Windows" else "clear")
+    print(f"{Fore.GREEN}[+] Logged in as {username} ({userid})")
+    print(f"{Fore.CYAN}[i] LeetCode: {LEETCODE_USERNAME}")
+    print(f"{Fore.CYAN}[i] Updating every ~5 minutes (slowed to avoid bans)")
+    print(f"{Fore.CYAN}[i] Keep uptime pinger running!\n")
 
     while True:
-        try:
-            await send_status_quick(usertoken, DISCORD_STATUS)
-        except:
-            print(f"{Fore.YELLOW}Reconnecting in 10 seconds...")
-        
-        await asyncio.sleep(50)
+        await send_status_quick(usertoken, DISCORD_STATUS)
+        await asyncio.sleep(300)  # 5 minutes - much safer
 
 keep_alive()
 asyncio.run(run_onliner())
