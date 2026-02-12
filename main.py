@@ -13,6 +13,8 @@ init(autoreset=True)
 # ────────────────────────────────────────────────
 # CONFIG
 # ────────────────────────────────────────────────
+status = "online"  # online/dnd/idle
+custom_status = "youtube.com/@SeatedSaucer"  # Custom Status
 DISCORD_STATUS = "online"           # online / dnd / idle
 LEETCODE_USERNAME = "Prateek_pal"  # ← Change this!!
 UPDATE_INTERVAL_MINUTES = 30       # How often to refresh LeetCode count
@@ -106,7 +108,7 @@ async def onliner(token, status):
 
         # Get current LeetCode count
         solved = get_leetcode_solved()
-        custom_text = f"LeetCode Solved: {solved} 🔥"   # ← Customize this line!
+        custom_text = f"LeetCode Solved: {solved} 🔥"
 
         # Set custom status (type 4 = custom status)
         cstatus = {
@@ -119,8 +121,6 @@ async def onliner(token, status):
                         "state": custom_text,
                         "name": "Custom Status",
                         "id": "custom"
-                        # Optional emoji (uncomment & fill):
-                        # ,"emoji": {"name": "fire", "id": "123456789012345678", "animated": False}
                     }
                 ],
                 "status": status,
