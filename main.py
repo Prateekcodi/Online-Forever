@@ -71,26 +71,22 @@ def get_leetcode_solved():
         return "Error"
 
 # ────────────────────────────────────────────────
-# Send status (fixed version - no more errors)
+# Send status (fixed: wait for READY before sending op 3)
 # ────────────────────────────────────────────────
 async def send_status_quick(token, status):
     try:
         async with websockets.connect(
             "wss://gateway.discord.gg/?v=9&encoding=json",
-            max_size=None,          # This fixes the "message too big" error forever
+            max_size=None,          # Fixes "message too big"
             ping_interval=None,
             ping_timeout=None
         ) as ws:
-            # Wait for HELLO
-            start = json.loads(await ws.recv())
-            heartbeat = start["d"]["heartbeat_interval"]
+            # Receive HELLO (op 10)
+            hello = json.loads(await ws.recv())
+            heartbeat_interval = hello["d"]["heartbeat_interval"]
+            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Received HELLO")
 
-            # Get fresh LeetCode count
-            solved = get_leetcode_solved()
-            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
-            custom_text = f"LeetCode Solved: {solved} 🔥"
-
-            # Identify (login)
+            # Send IDENTIFY (op 2)
             auth = {
                 "op": 2,
                 "d": {
@@ -107,7 +103,12 @@ async def send_status_quick(token, status):
             await ws.send(json.dumps(auth))
             print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent")
 
-            # Send custom status
+            # Get fresh LeetCode count
+            solved = get_leetcode_solved()
+            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
+            custom_text = f"LeetCode Solved: {solved} 🔥"
+
+            # Prepare custom status (op 3)
             cstatus = {
                 "op": 3,
                 "d": {
@@ -124,17 +125,43 @@ async def send_status_quick(token, status):
                     "afk": False,
                 },
             }
-            await ws.send(json.dumps(cstatus))
-            print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent: {custom_text}")
 
-            # One heartbeat then close
-            await asyncio.sleep(heartbeat / 1000 * 1.1)
-            await ws.send(json.dumps({"op": 1, "d": "None"}))
-            await asyncio.sleep(2)
+            # Now loop to receive events until READY (op 0)
+            heartbeat_task = None
+            ready_received = False
+            while not ready_received:
+                try:
+                    message = await asyncio.wait_for(ws.recv(), timeout=heartbeat_interval / 1000)
+                    data = json.loads(message)
+                    op = data["op"]
+
+                    if op == 10:  # HELLO (should already be handled)
+                        pass
+                    elif op == 11:  # HEARTBEAT_ACK
+                        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat ACK received")
+                    elif op == 0:  # DISPATCH (e.g., READY)
+                        if data["t"] == "READY":
+                            ready_received = True
+                            print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Received READY")
+                            # Now send custom status
+                            await ws.send(json.dumps(cstatus))
+                            print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent: {custom_text}")
+                    elif op == 1:  # HEARTBEAT request
+                        await ws.send(json.dumps({"op": 1, "d": None}))
+                        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat sent")
+
+                    # Ignore other events for now
+
+                except asyncio.TimeoutError:
+                    # Send heartbeat if timeout (no message)
+                    await ws.send(json.dumps({"op": 1, "d": None}))
+                    print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Heartbeat sent (timeout)")
+
+            # After sending status, wait a bit and close
+            await asyncio.sleep(5)
 
     except Exception as e:
         print(f"{Fore.RED}Error: {e}")
-        raise
 
 # ────────────────────────────────────────────────
 # Main loop
