@@ -91,17 +91,19 @@ async def onliner(token, status):
         start = json.loads(await ws.recv())
         heartbeat = start["d"]["heartbeat_interval"]
 
-        # Identify / login
+        # Identify / login - reduced properties to avoid large payload
         auth = {
             "op": 2,
             "d": {
                 "token": token,
                 "properties": {
-                    "$os": platform.system(),
+                    "$os": "Windows 10",
                     "$browser": "Google Chrome",
-                    "$device": platform.system(),
+                    "$device": "Windows",
                 },
                 "presence": {"status": status, "afk": False},
+                "compress": False,
+                "large_threshold": 50,
             },
         }
         await ws.send(json.dumps(auth))
