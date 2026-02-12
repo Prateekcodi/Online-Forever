@@ -19,17 +19,17 @@ DISCORD_STATUS = "online"
 
 LEETCODE_USERNAME = "Prateek_pal"
 
-# From your Discord Developer Application (exactly from screenshot)
+# From your Discord Developer Application
 APPLICATION_ID = "1471509621888782582"
 
-# Rich Presence assets (exactly as in your screenshot)
+# Rich Presence assets (from your screenshot)
 LARGE_IMAGE_KEY  = "time"
 LARGE_IMAGE_TEXT = "Numbani"
 
 SMALL_IMAGE_KEY  = "time"
 SMALL_IMAGE_TEXT = "Rogue - Level 100"
 
-# Fancy/crazy playing text (you can change these)
+# Fancy playing text
 PLAYING_NAME = "Hacking the Matrix"
 DETAILS_TEMPLATE = "LeetCode Solved: {solved}"
 STATE_TEMPLATE   = "Streak: {streak} days 🔥 Mad Coding"
@@ -89,12 +89,28 @@ async def gateway_loop():
 
     last_update = 0
 
+    # ────────────────────────────────────────────────
+    # NEW: Dummy outbound request every 2 minutes to prevent Railway sleep
+    # ────────────────────────────────────────────────
+    async def keep_alive_outbound():
+        while True:
+            try:
+                # Simple GET to a free test endpoint (generates outbound traffic)
+                requests.get("https://httpbin.org/get", timeout=5)
+                print(f"{Fore.CYAN}[KeepAlive] Dummy outbound GET sent (every 2 min)")
+            except Exception as ex:
+                print(f"{Fore.YELLOW}[KeepAlive] Dummy request failed: {ex}")
+            await asyncio.sleep(120)  # 120 seconds = 2 minutes
+
+    # Start the dummy task immediately
+    asyncio.create_task(keep_alive_outbound())
+
     while True:
         try:
             async with websockets.connect(
                 "wss://gateway.discord.gg/?v=9&encoding=json",
                 max_size=None,
-                ping_interval=20,
+                ping_interval=30,
                 ping_timeout=20
             ) as ws:
                 hello = json.loads(await ws.recv())
@@ -175,7 +191,6 @@ async def gateway_loop():
         except websockets.exceptions.ConnectionClosed as e:
             print(f"{Fore.YELLOW}Disconnected code: {e.code} reason: {e.reason}")
             print(f"{Fore.YELLOW}Full exception: {e}")
-            
             if e.code == 4004:
                 print(f"{Fore.RED}4004 → Token invalidated. Get fresh token from browser DevTools → update env var → redeploy")
             await asyncio.sleep(30 + random.randint(0, 60))
