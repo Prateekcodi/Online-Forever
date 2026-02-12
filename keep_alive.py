@@ -1,15 +1,20 @@
 from flask import Flask
-from threading import Thread
+import threading
+import time
 
-app = Flask('')
+app = Flask(__name__)
+@app.route('/health')
+def health():
+    return "OK", 200
 
 @app.route('/')
-def main():
-    return '<meta http-equiv="refresh" content="0; URL=https://google.com"/>'
+def home():
+    return "Alive", 200
 
-def run():
-    app.run(host="0.0.0.0", port=8080)
+def keep_alive_thread():
+    while True:
+        time.sleep(30)  # just keep thread alive
 
-def keep_alive():
-    server = Thread(target=run)
-    server.start()
+if __name__ == "__main__":
+    threading.Thread(target=keep_alive_thread, daemon=True).start()
+    app.run(host='0.0.0.0', port=8080)
