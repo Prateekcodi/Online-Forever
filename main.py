@@ -107,10 +107,16 @@ async def onliner(token, status):
             },
         }
         await ws.send(json.dumps(auth))
-
+        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Identify sent, waiting for ready...")
+        
+        # Wait for READY event
+        await ws.recv()
+        
         # Get current LeetCode count
         solved = get_leetcode_solved()
+        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] LeetCode solved: {solved}")
         custom_text = f"LeetCode Solved: {solved} 🔥"
+        print(f"{Fore.WHITE}[{Fore.CYAN}i{Fore.WHITE}] Setting custom status: {custom_text}")
 
         # Set custom status (type 4 = custom status)
         cstatus = {
@@ -130,6 +136,7 @@ async def onliner(token, status):
             },
         }
         await ws.send(json.dumps(cstatus))
+        print(f"{Fore.WHITE}[{Fore.LIGHTGREEN_EX}+{Fore.WHITE}] Custom status sent!")
 
         # Heartbeat loop
         while True:
